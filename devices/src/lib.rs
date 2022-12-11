@@ -58,6 +58,16 @@ pub mod pallet {
 		pub block: T::BlockNumber,
 	}
 
+	#[derive(Clone, Encode, Decode, PartialEq, Debug, TypeInfo, Eq)]
+	#[scale_info(skip_type_params(T))]
+	pub struct EnergyData<T:Config> {
+		pub voltage: Vec<u8>,
+		pub current: Vec<u8>,
+		pub energy: Vec<u8>,
+		pub energyacum: Vec<u8>,
+		pub block: T::BlockNumber,
+	}
+
 	#[derive(Clone, Encode, Decode, PartialEq, Debug, TypeInfo, Eq, Copy)]
 	#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 	pub enum DeviceStatus {
@@ -76,12 +86,33 @@ pub mod pallet {
 		OptionQuery,
 	>;
 
+	#[pallet::storage]
+	#[pallet::getter(fn get_energydata_item)]
+	pub(super) type EnergyDataItem<T:Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		(T::AccountId,u64),
+		EnergyData<T>,
+		OptionQuery,
+	>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_device_data_index)]
+	pub(super) type DeviceDataIndex<T:Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		u64,
+		OptionQuery,
+	>;
+
 	
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		NewDeviceAdded(T::AccountId),
 		DeviceRemoved(T::AccountId),
+		NewRecord(T::AccountId),
 	}
 
 	// Errors inform users that something went wrong.
@@ -102,7 +133,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// An example dispatchable that takes a singles value as a parameter, writes the value to
 		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[pallet::weight(10_000 + T::DbWeight::get().writes(3))]
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(3) + T::DbWeight::get().reads(2))]
 		pub fn onboard_device(origin: OriginFor<T>, address: T::AccountId, info: Vec<u8>) -> DispatchResult {
 			
 			ensure_root(origin)?;
@@ -125,7 +156,7 @@ pub mod pallet {
 		}
 
 		
-		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(2) + T::DbWeight::get().reads(2))]
 		pub fn remove_device(origin: OriginFor<T>, address: T::AccountId) -> DispatchResult {
 			
 			ensure_root(origin)?;
@@ -139,6 +170,27 @@ pub mod pallet {
 			// Emit an event.
 			Self::deposit_event(Event::DeviceRemoved(address));
 			// Return a successful DispatchResultWithPostInfo
+			Ok(())
+		}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(3) + T::DbWeight::get().reads(2))]
+		pub fn record(origin: OriginFor<T>, voltage: Vec<u8>, current: Vec<u8>, energy: Vec<u8>, energyacum: Vec<u8>) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			ensure!(Devices::<T>::contains_key(who.clone()), Error::<T>::DeviceDoesNotExist);
+			let count = Self::get_device_data_index(who.clone()).unwrap().checked_add(1).ok_or(ArithmeticError::Overflow)?;
+
+			let data = EnergyData::<T> {
+				voltage: voltage.clone(),
+				current: current.clone(),
+				energy: energy.clone(),
+				energyacum: energyacum.clone(),
+				block: <frame_system::Pallet<T>>::block_number(),
+			};
+
+			EnergyDataItem::<T>::insert((who.clone(),count.clone()),&data);
+			DeviceDataIndex::<T>::insert(who.clone(),count);
+
+			Self::deposit_event(Event::NewRecord(who));
 			Ok(())
 		}
 	}
