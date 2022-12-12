@@ -23,13 +23,6 @@ pub mod pallet {
 	#[cfg(feature = "std")]
 	use frame_support::serde::{Deserialize, Serialize};
 
-	#[pallet::type_value]
-    pub fn MaximumDataSize<T: Config>() -> u32
-    {
-        512u32
-    }
-
-
 	#[pallet::pallet]
 	#[pallet::generate_store(pub(super) trait Store)]
 	#[pallet::without_storage_info]
@@ -41,6 +34,8 @@ pub mod pallet {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		type Time: Time;
+		#[pallet::constant]
+        type WindowSize: Get<u64>;
 	}
 
 	#[pallet::storage]
@@ -97,13 +92,13 @@ pub mod pallet {
 	>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn get_device_data_index)]
-	pub(super) type DeviceDataIndex<T:Config> = StorageMap<
+	#[pallet::getter(fn get_device_buffer_index)]
+	pub(super) type DeviceBufferIndex<T:Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		T::AccountId,
-		u64,
-		OptionQuery,
+		(u64,u64),
+		ValueQuery,
 	>;
 
 	
@@ -177,7 +172,8 @@ pub mod pallet {
 		pub fn record(origin: OriginFor<T>, voltage: Vec<u8>, current: Vec<u8>, energy: Vec<u8>, energyacum: Vec<u8>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			ensure!(Devices::<T>::contains_key(who.clone()), Error::<T>::DeviceDoesNotExist);
-			let count = Self::get_device_data_index(who.clone()).unwrap().checked_add(1).ok_or(ArithmeticError::Overflow)?;
+			let (mut end,mut start) = Self::get_device_buffer_index(who.clone());
+			let buffer = T::WindowSize::get();
 
 			let data = EnergyData::<T> {
 				voltage: voltage.clone(),
@@ -187,8 +183,25 @@ pub mod pallet {
 				block: <frame_system::Pallet<T>>::block_number(),
 			};
 
-			EnergyDataItem::<T>::insert((who.clone(),count.clone()),&data);
-			DeviceDataIndex::<T>::insert(who.clone(),count);
+			end = end + 1;
+
+			match buffer - end {
+				0 => end = 0,
+				_ => (),
+			}
+
+
+			if end == start {
+				start = start + 1;
+			}
+
+			match buffer - start {
+				0 => start = 0,
+				_ => (),
+			}
+			
+			EnergyDataItem::<T>::insert((who.clone(),end.clone()),&data);
+			DeviceBufferIndex::<T>::insert(who.clone(),(end,start));
 
 			Self::deposit_event(Event::NewRecord(who));
 			Ok(())

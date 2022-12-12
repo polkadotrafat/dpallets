@@ -60,6 +60,7 @@ impl pallet_timestamp::Config for Test {
 impl pallet_devices::Config for Test {
 	type Event = Event;
 	type Time = Timestamp;
+	type WindowSize = ConstU64<8>;
 }
 
 // Build genesis storage according to the mock runtime.
